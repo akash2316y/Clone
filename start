@@ -1,0 +1,19 @@
+aria2c --enable-rpc --rpc-listen-all=true --rpc-allow-origin-all --daemon && python3 main.py
+
+
+
+For Docker
+
+
+sudo docker build . -t tbx
+
+
+sudo docker run -d --name tera --restart unless-stopped terabox 
+
+sudo docker run tbx
+
+# sudo docker logs -f tbx
+# sudo docker ps
+# sudo docker stop tbx
+# xvfb-run -a python3 api.py
+
