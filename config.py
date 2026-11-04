@@ -4,6 +4,9 @@ from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Load .env file
+load_dotenv()
+
 #Bot token @Botfather
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 
