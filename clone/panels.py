@@ -13,7 +13,7 @@ from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import InlineKeyboardButton as Btn, InlineKeyboardMarkup as Markup
 
-from config import OWNER_ID
+from config import CHANNEL_ID, OWNER_ID
 from clone import ctx, logs
 from clone.crypto import enc
 from clone.plans import limits
@@ -95,8 +95,8 @@ async def render(clone: dict, screen: str):
         rows = _toggle_rows(clone, plan, "s") + [
             [_b(sc("📢 force sub"), "fs", cid), _b(sc("🔗 shortener"), "sh", cid)],
             [_b(sc("📝 caption"), "ca", cid), _b(sc("🎨 start page"), "st", cid)],
-            [_b(sc("🗒 user logs"), "lg", cid), _b(sc("📊 dashboard"), "d", cid)],
-            [close]]
+            [_b(sc("🗒 user logs"), "lg", cid), _b(sc("🗄 db channel"), "db", cid)],
+            [_b(sc("📊 dashboard"), "d", cid), close]]
         return text, Markup(rows)
 
     if screen == "fs":
@@ -154,6 +154,17 @@ async def render(clone: dict, screen: str):
         rows = [[_b(sc("➕ set channel"), "lg", cid, "ask", "lgset"), _b(sc("🗑 clear"), "lg", cid, "clr", "log")], home]
         return text, Markup(rows)
 
+    if screen == "db":
+        ch = s.get("db_channel") or 0
+        text = sc("<b>🗄 db channel</b>\n<blockquote>your own storage channel. /genlink saves every file you send into it "
+                  "and turns them into one link.\nadd this bot as admin there (post + delete messages), then connect it. "
+                  "only your files go here, never the main owner's.</blockquote>") \
+            + f"\n{sc('channel')}: <code>{ch or sc('not set')}</code>"
+        if ch:
+            text += "\n" + sc("⚠️ changing it makes old /genlink links stop working.")
+        rows = [[_b(sc("➕ set channel"), "db", cid, "ask", "dbset"), _b(sc("🗑 clear"), "db", cid, "clr", "db")], home]
+        return text, Markup(rows)
+
     return sc("<b>unknown view</b>"), Markup([[close]])
 
 
@@ -179,6 +190,7 @@ PROMPTS = {
     "sttext": "✏️ send the new <b>start message</b> (html ok, max 700 chars).",
     "stpic": "🖼 send a <b>photo</b> to use on /start.",
     "lgset": "🗒 send the <b>channel id</b> (or forward a post). the bot must be admin there.",
+    "dbset": "🗄 send your <b>db channel id</b> (e.g. -100123…), its @username, or <b>forward any post</b> from it.\nthis bot must be admin there with post + delete rights.",
 }
 PREMIUM_ONLY = {"shdom": "custom_shortener", "shapi": "custom_shortener", "cap": "custom_caption",
                 "sttext": "custom_start", "stpic": "custom_start"}
@@ -251,7 +263,8 @@ async def on_callback(client, query):
         reset = {"short": {"settings.shortener.domain": "", "settings.shortener.api": "", "settings.shortener.enabled": False},
                  "caption": {"settings.caption.text": "", "settings.caption.enabled": False},
                  "start": {"settings.start.text": "", "settings.start.pic": ""},
-                 "log": {"settings.user_log_channel": 0}}.get(arg)
+                 "log": {"settings.user_log_channel": 0},
+                 "db": {"settings.db_channel": 0}}.get(arg)
         if reset:
             await store.update(cid, reset)
     elif action == "ask" and arg in PROMPTS:
@@ -368,6 +381,24 @@ async def on_input(client, message):
             else:
                 await client.send_message(ch, sc("✅ log channel connected."))
                 await store.update(cid, {"settings.user_log_channel": ch})
+        elif kind == "dbset":
+            from config import OWNER_DB_CHANNEL
+            ch = await _resolve_channel(client, message)
+            if ch is None:
+                err = "send a channel id, @username, or forward a post from the channel"
+            elif ch in (OWNER_DB_CHANNEL, CHANNEL_ID) or ch >= 0:
+                err = "that can't be used. create your own channel and use it here"
+            elif not await _bot_is_admin(client, ch):
+                err = "make this bot an admin in that channel first, then send it again"
+            else:
+                try:                                   # prove the bot can post AND delete there
+                    probe = await client.send_message(ch, sc("✅ db channel connected."))
+                    await probe.delete()
+                except Exception:
+                    err = "give this bot post + delete message rights in that channel, then send it again"
+                if not err:
+                    await store.update(cid, {"settings.db_channel": ch})
+                    note = "✅ db channel connected. now send /genlink"
     except Exception as e:
         logging.info(f"[clone {cid}] input '{kind}' failed: {e}")
         err = "couldn't verify that, check the bot has access and try again"
