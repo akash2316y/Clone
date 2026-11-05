@@ -10,7 +10,8 @@ USER = [
 ]
 OWNER = [
     ("/myclone", "dashboard: users, files, links + quick toggles"),
-    ("/settings", "force-sub, shortener, captions, auto-delete, branding"),
+    ("/settings", "force-sub, shortener, captions, auto-delete, branding, db channel"),
+    ("/genlink", "send many files, store them in your db channel, get one link"),
     ("/cancel", "cancel a pending input"),
 ]
 ADMIN = [
