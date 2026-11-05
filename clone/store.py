@@ -23,6 +23,7 @@ def default_settings() -> Dict[str, Any]:
         "protect": False,
         "auto_delete": {"links": 0, "video": 0},   # seconds, 0 = off
         "user_log_channel": 0,
+        "db_channel": 0,                            # clone owner's OWN storage channel (used by /genlink)
     }
 
 
