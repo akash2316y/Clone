@@ -18,7 +18,7 @@ from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC
-from clone import ctx, logs, panels
+from clone import ctx, genlink, logs, panels
 from clone.antispam import gate, is_exempt
 from clone.cmdlist import commands_text
 from clone.crypto import dec
@@ -51,29 +51,45 @@ def b64_decode(s: str) -> Optional[str]:
         return None
 
 
-def parse_link(string_: Optional[str]) -> Tuple[Optional[str], List[int]]:
-    """'get-<id*chan>[-<id*chan>]'  ->  ('get', [ids])  (same format the main bot generates)."""
+def b64_encode(s: str) -> str:                      # same as the main bot's helper_func.encode
+    return base64.urlsafe_b64encode(s.encode("ascii")).decode("ascii").strip("=")
+
+
+def parse_link_src(string_: Optional[str], own_ch: int = 0) -> Tuple[Optional[str], List[int], str]:
+    """'get-<id*chan>[-<id*chan>]' -> ('get', [ids], source).
+
+    source is "own"     when the link was made with this clone's own db channel (/genlink in the clone),
+              "central" when it was made by the main bot (owner's db channel).
+    """
     if not string_:
-        return None, []
+        return None, [], ""
     parts = string_.split("-")
     if parts[0] not in ("get", "premium") or len(parts) not in (2, 3):
-        return None, []
-    mult = abs(OWNER_DB_CHANNEL)
+        return None, [], ""
     try:
-        nums = [int(p) for p in parts[1:]]
-        if any(n % mult for n in nums):
-            return None, []
-        nums = [n // mult for n in nums]
+        raw = [int(p) for p in parts[1:]]
     except ValueError:
-        return None, []
-    if len(nums) == 1:
-        ids = nums
-    else:
-        a, b = nums
-        ids = list(range(a, b + 1)) if a <= b else list(range(a, b - 1, -1))
-    if not ids or len(ids) > MAX_BATCH or min(ids) < 1:
-        return None, []
-    return parts[0], ids
+        return None, [], ""
+    cands = ([("own", abs(own_ch))] if own_ch else []) + [("central", abs(OWNER_DB_CHANNEL))]
+    for src, mult in cands:
+        if not mult or any(n % mult for n in raw):
+            continue
+        nums = [n // mult for n in raw]
+        if len(nums) == 1:
+            ids = nums
+        else:
+            a, b = nums
+            ids = list(range(a, b + 1)) if a <= b else list(range(a, b - 1, -1))
+        if not ids or len(ids) > MAX_BATCH or min(ids) < 1:
+            continue
+        return parts[0], ids, src
+    return None, [], ""
+
+
+def parse_link(string_: Optional[str]) -> Tuple[Optional[str], List[int]]:
+    """Main-bot (central channel) links only  ->  ('get', [ids])."""
+    kind, ids, _ = parse_link_src(string_)
+    return kind, ids
 
 
 async def current(client) -> Optional[dict]:
@@ -254,7 +270,8 @@ async def deliver(client, message, clone, plan, msgs: list, payload: str, scope:
 
 async def handle_payload(client, message, clone, payload: str):
     uid, cid = message.from_user.id, clone["_id"]
-    kind, ids = parse_link(b64_decode(payload))
+    own_ch = int(clone["settings"].get("db_channel") or 0)
+    kind, ids, src = parse_link_src(b64_decode(payload), own_ch)
     plan, _ = await ctx.manager.plan_of(clone)
     if not kind:
         return await message.reply_text(branded(clone, plan, sc("<b>❌ invalid or expired link.</b>")), quote=True)
@@ -274,7 +291,10 @@ async def handle_payload(client, message, clone, payload: str):
 
     wait = await message.reply_text(sc("<b>⏳ please wait...</b>"), quote=True)
     try:
-        msgs = await ctx.manager.relay.fetch(ids)
+        if src == "own":      # files the clone owner stored in their own db channel (clone bot reads it itself)
+            msgs = await ctx.manager.relay.fetch_own(client, own_ch, ids)
+        else:                 # owner's central channel, served through the main bot
+            msgs = await ctx.manager.relay.fetch(ids)
     except Exception as e:
         logging.error(f"[clone {cid}] fetch failed: {e}")
         return await wait.edit_text(sc("<b>⚠️ something went wrong, try again later.</b>"))
@@ -395,6 +415,7 @@ async def register(client):
     add(MessageHandler(on_myclone, filters.command("myclone") & priv))
     add(MessageHandler(on_settings, filters.command("settings") & priv))
     add(MessageHandler(on_cancel, filters.command("cancel") & priv))
+    genlink.register(client)
     add(CallbackQueryHandler(panels.on_callback, filters.regex(r"^cs\|")), group=-1)
     add(MessageHandler(panels.on_input, priv & ~filters.command(["start", "cancel"]) & panels.has_pending), group=1)
 
@@ -407,6 +428,7 @@ async def set_menu(client):
             BotCommand("cmd", "All commands"),
             BotCommand("myclone", "Clone dashboard (owner)"),
             BotCommand("settings", "Clone settings (owner)"),
+            BotCommand("genlink", "Make a multi-file link (owner)"),
         ])
     except Exception as e:
         logging.warning(f"set_bot_commands failed: {e}")
