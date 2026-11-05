@@ -163,6 +163,12 @@ async def gate(client, update):
         update.stop_propagation()
         return
 
+    cid = getattr(client, "clone_id", None)
+    if cid is not None:
+        from clone import genlink                       # lazy: avoid circular import
+        if genlink.has_session(cid, uid):               # owner is bulk-uploading via /genlink
+            return
+
     v = limiter.check(uid)
     if v.kind == "ok":
         return
