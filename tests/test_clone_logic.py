@@ -202,6 +202,112 @@ class LinkTests(unittest.TestCase):
         self.assertIsNone(kind)
 
 
+class OwnChannelLinkTests(unittest.TestCase):
+    CH = abs(int(os.environ["CHANNEL_ID"]))
+    OWN = -1005550001111
+
+    def enc(self, ids, ch):
+        return main_bot_encode("get-" + "-".join(str(i * abs(ch)) for i in ids))
+
+    def test_own_channel_link(self):
+        raw = engine.b64_decode(self.enc((3, 6), self.OWN))
+        self.assertEqual(engine.parse_link_src(raw, self.OWN), ("get", [3, 4, 5, 6], "own"))
+
+    def test_central_link_still_works_in_clone_with_own_channel(self):
+        raw = engine.b64_decode(self.enc((9,), -self.CH))
+        self.assertEqual(engine.parse_link_src(raw, self.OWN), ("get", [9], "central"))
+
+    def test_own_link_not_served_without_matching_channel(self):
+        raw = engine.b64_decode(self.enc((3, 6), self.OWN))
+        self.assertEqual(engine.parse_link_src(raw, 0)[0], None)                     # clone has no db channel
+        self.assertEqual(engine.parse_link_src(raw, -1007770002222)[0], None)        # another clone's channel
+
+    def test_b64_roundtrip(self):
+        self.assertEqual(engine.b64_decode(engine.b64_encode("get-123-456")), "get-123-456")
+
+
+class CloneGenlinkFlowTests(unittest.TestCase):
+    """Fake Telegram objects: owner sends 3 messages, taps Generate Link -> one range link in the OWN channel."""
+    OWN = -1005550001111
+
+    def run_flow(self, owner=True, ch=OWN):
+        from clone import ctx, genlink
+        genlink._S.clear()
+        clone = {"_id": 7, "owner_id": 500, "username": "MyClone", "settings": {"db_channel": ch}}
+        ctx.manager = SimpleNamespace(store=SimpleNamespace(get=lambda cid: _aw(clone)))
+        out = {"copied": [], "sent": [], "replies": []}
+        counter = iter(range(100, 200))
+
+        class Msg:
+            def __init__(self, uid, text="hi"):
+                self.from_user = SimpleNamespace(id=uid)
+                self.chat = SimpleNamespace(id=uid)
+                self.service, self.text = False, text
+            async def copy(self, to, **kw):
+                out["copied"].append(to)
+                return SimpleNamespace(id=next(counter))
+            async def reply_text(self, t, **kw):
+                out["replies"].append(t)
+            def stop_propagation(self):
+                raise _Stop()
+
+        class _Stop(Exception):
+            pass
+
+        class Client:
+            clone_id = 7
+            async def send_message(self, chat_id, text, **kw):
+                out["sent"].append(text)
+                return SimpleNamespace(delete=lambda: _aw(None))
+            async def delete_messages(self, *a, **k):
+                out.setdefault("deleted", []).append(a)
+
+        class Query:
+            def __init__(self, uid, data):
+                self.from_user, self.data = SimpleNamespace(id=uid), data
+                self.message = SimpleNamespace(chat=SimpleNamespace(id=uid), delete=lambda: _aw(None),
+                                               edit_text=lambda *a, **k: _aw(None))
+            async def answer(self, *a, **k):
+                out.setdefault("answers", []).append(a)
+            def stop_propagation(self):
+                raise _Stop()
+
+        async def go():
+            uid = 500 if owner else 600
+            c = Client()
+            await genlink.on_genlink(c, Msg(uid, "/genlink"))
+            for _ in range(3):
+                try:
+                    await genlink.on_collect(c, Msg(uid))
+                except _Stop:
+                    pass
+            await asyncio.sleep(1.7)                  # debounce -> a single panel
+            try:
+                await genlink.on_cb(c, Query(uid, "gl_gen"))
+            except _Stop:
+                pass
+        asyncio.run(go())
+        return out
+
+    def test_owner_flow_builds_one_link_from_own_channel(self):
+        out = self.run_flow()
+        self.assertEqual(out["copied"], [self.OWN] * 3)
+        link = [t for t in out["sent"] if "Here Is Your Link" in t][0]
+        payload = link.split("?start=")[1].strip()
+        self.assertEqual(engine.parse_link_src(engine.b64_decode(payload), self.OWN), ("get", [100, 101, 102], "own"))
+        self.assertEqual(len([t for t in out["sent"] if t.startswith("Stored Messages")]), 2)  # intro(0) + one debounced panel
+
+    def test_not_owner_and_no_channel(self):
+        self.assertEqual(self.run_flow(owner=False)["copied"], [])
+        self.assertEqual(self.run_flow(ch=0)["copied"], [])
+
+
+def _aw(v):
+    async def f():
+        return v
+    return f()
+
+
 # ================================================================== settings merge
 class StoreTests(unittest.TestCase):
     def test_merge_adds_new_keys_and_keeps_saved(self):
