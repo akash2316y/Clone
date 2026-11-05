@@ -1,7 +1,8 @@
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import Bot
+from config import OWNER_ID
 from pyrogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from asyncio import TimeoutError
 from helper_func import encode, get_message_id, is_admin
@@ -42,24 +43,173 @@ async def batch(client: Client, message: Message):
     await second_message.reply_text(f"<b>Here is your link</b>\n\n{link}", quote=True, reply_markup=reply_markup)
 
 
-@Bot.on_message(filters.private & is_admin & filters.command('genlink'))
-async def link_generator(client: Client, message: Message):
-    while True:
-        try:
-            channel_message = await client.ask(text = "Forward Message from the DB Channel (with Quotes)..\nor Send the DB Channel Post link", chat_id = message.from_user.id, filters=(filters.forwarded | (filters.text & ~filters.forwarded)), timeout=60)
-        except:
-            return
-        msg_id = await get_message_id(client, channel_message)
-        if msg_id:
-            break
-        else:
-            await channel_message.reply("❌ Error\n\nthis Forwarded Post is not from my DB Channel or this Link is not taken from DB Channel", quote = True)
-            continue
+# ──────────────────────────────────────────────────────────────────────────────
+#  /genlink  (OWNER ONLY)
+#  Multi-message collector: jitne bhi messages bhejo sab DB channel me store honge
+#  aur "Generate Link" dabane par ek single link ban jayega.
+#  Buttons: Generate Link | Cancel | Pause (Pause ke baad Resume)
+# ──────────────────────────────────────────────────────────────────────────────
+_GL = {}  # owner_id -> {"ids": [], "paused": bool, "panel": Message|None, "lock": Lock, "gen": int}
 
-    base64_string = await encode(f"get-{msg_id * abs(client.db_channel.id)}")
-    link = f"https://t.me/{client.username}?start={base64_string}"
-    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔁 Share URL", url=f'https://telegram.me/share/url?url={link}')]])
-    await channel_message.reply_text(f"<b>Here is your link</b>\n\n{link}", quote=True, reply_markup=reply_markup)
+
+def _gl_text(s):
+    if s["paused"]:
+        return (
+            f"<b>⏸ Paused</b>\n\nStored Messages: <b>{len(s['ids'])}</b>\n\n"
+            "<i>Abhi messages store nahi honge. Resume dabao aur phir bhejo.</i>"
+        )
+    return (
+        f"Stored Messages: <b>{len(s['ids'])}</b>\n\n"
+        "<i>Want to add more messages? Just send them here!</i>\n\n"
+        "<blockquote><i>✨You can now send multiple messages at once.</i></blockquote>"
+    )
+
+
+def _gl_markup(s):
+    toggle = (
+        InlineKeyboardButton("Resume", callback_data="gl_resume")
+        if s["paused"] else
+        InlineKeyboardButton("Pause", callback_data="gl_pause")
+    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Generate Link", callback_data="gl_gen")],
+        [InlineKeyboardButton("Cancel", callback_data="gl_cancel"), toggle],
+    ])
+
+
+async def _gl_send_panel(client, chat_id, s):
+    old = s.get("panel")
+    if old:
+        try:
+            await old.delete()
+        except Exception:
+            pass
+    s["panel"] = await client.send_message(chat_id, _gl_text(s), reply_markup=_gl_markup(s))
+
+
+async def _gl_refresh_later(client, chat_id, uid, s, gen):
+    # Debounce: jab tak messages aate rahenge, panel sirf last message ke baad ek baar aayega
+    await asyncio.sleep(1.5)
+    if _GL.get(uid) is not s or s["gen"] != gen:
+        return
+    try:
+        await _gl_send_panel(client, chat_id, s)
+    except Exception:
+        pass
+
+
+async def _gl_collecting(_, __, message):
+    if not message.from_user or message.service:
+        return False
+    s = _GL.get(message.from_user.id)
+    if not s or s["paused"]:
+        return False
+    if message.text and message.text.startswith("/"):
+        return False
+    return True
+
+_gl_active = filters.create(_gl_collecting)
+
+
+@Bot.on_message(filters.private & filters.user(OWNER_ID) & filters.command('genlink'))
+async def link_generator(client: Client, message: Message):
+    s = _GL.get(message.from_user.id)
+    if not s:
+        s = {"ids": [], "paused": False, "panel": None, "lock": asyncio.Lock(), "gen": 0}
+        _GL[message.from_user.id] = s
+    s["paused"] = False
+    s["gen"] += 1
+    await _gl_send_panel(client, message.chat.id, s)
+
+
+@Bot.on_message(filters.private & filters.user(OWNER_ID) & _gl_active, group=-1)
+async def link_generator_collect(client: Client, message: Message):
+    uid = message.from_user.id
+    s = _GL.get(uid)
+    if not s:
+        return
+    async with s["lock"]:
+        if s["paused"] or _GL.get(uid) is not s:
+            return
+        try:
+            sent = await message.copy(client.db_channel.id, disable_notification=True)
+            s["ids"].append(sent.id)
+        except Exception as e:
+            await message.reply(f"❌ Failed to store this message:\n<code>{e}</code>", quote=True)
+            message.stop_propagation()
+        s["gen"] += 1
+        gen = s["gen"]
+    asyncio.create_task(_gl_refresh_later(client, message.chat.id, uid, s, gen))
+    message.stop_propagation()
+
+
+@Bot.on_callback_query(filters.regex(r"^gl_(gen|cancel|pause|resume)$") & filters.user(OWNER_ID), group=-1)
+async def link_generator_cb(client: Client, query: CallbackQuery):
+    uid = query.from_user.id
+    action = query.data[3:]
+    s = _GL.get(uid)
+    if not s:
+        await query.answer("Session expired. /genlink dubara bhejo.", show_alert=True)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        query.stop_propagation()
+
+    if action == "pause":
+        s["paused"] = True
+        s["gen"] += 1
+        await query.message.edit_text(_gl_text(s), reply_markup=_gl_markup(s))
+        await query.answer("Paused")
+
+    elif action == "resume":
+        s["paused"] = False
+        s["gen"] += 1
+        await query.message.edit_text(_gl_text(s), reply_markup=_gl_markup(s))
+        await query.answer("Resumed")
+
+    elif action == "cancel":
+        async with s["lock"]:
+            _GL.pop(uid, None)
+            ids = list(s["ids"])
+        # Is session me store hue messages DB channel se hata do
+        for i in range(0, len(ids), 100):
+            try:
+                await client.delete_messages(client.db_channel.id, ids[i:i + 100])
+            except Exception:
+                pass
+        await query.message.edit_text("<b>❌ Cancelled.</b>\n<blockquote>Stored messages discard kar diye gaye.</blockquote>")
+        await query.answer("Cancelled")
+
+    elif action == "gen":
+        async with s["lock"]:
+            ids = list(s["ids"])
+            if not ids:
+                await query.answer("Pehle kuch messages bhejo!", show_alert=True)
+                query.stop_propagation()
+            _GL.pop(uid, None)
+
+        first, last = min(ids), max(ids)
+        mult = abs(client.db_channel.id)
+        string = f"get-{first * mult}" if first == last else f"get-{first * mult}-{last * mult}"
+        base64_string = await encode(string)
+        link = f"https://t.me/{client.username}?start={base64_string}"
+        reply_markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔁 Share URL", url=f"https://telegram.me/share/url?url={link}")]]
+        )
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await client.send_message(
+            query.message.chat.id,
+            f"<blockquote><b>Here Is Your Link:</b></blockquote>\n\n{link}",
+            reply_markup=reply_markup,
+            disable_web_page_preview=True,
+        )
+        await query.answer("Link generated")
+
+    query.stop_propagation()
 
 
 @Bot.on_message(filters.private & is_admin & filters.command("batch2"))
