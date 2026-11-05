@@ -51,6 +51,19 @@ class Relay:
             out.extend(m for m in msgs if m and not getattr(m, "empty", False))
         return out
 
+    async def fetch_own(self, clone_client, channel: int, ids: List[int]) -> list:
+        """Read posts from a clone owner's OWN db channel with the clone bot itself."""
+        out = []
+        for i in range(0, len(ids), 200):
+            msgs = await clone_client.get_messages(channel, ids[i:i + 200])
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+            for m in msgs:
+                if m and not getattr(m, "empty", False):
+                    m._clone_own = True          # file_ids are valid for this bot: no download/upload/cache needed
+                    out.append(m)
+        return out
+
     @staticmethod
     def _kwargs(mtype: str, obj, caption: Optional[str], protect: bool, thumb=None) -> dict:
         kw = {"protect_content": protect}
@@ -86,6 +99,9 @@ class Relay:
             return await clone_client.send_message(chat_id, text, protect_content=protect)
 
         sender = getattr(clone_client, f"send_{mtype}")
+
+        if getattr(msg, "_clone_own", False):            # own db channel: send straight by file_id
+            return await sender(chat_id, obj.file_id, **self._kwargs(mtype, obj, caption, protect))
 
         cached = await self.store.get_file(clone_id, msg.id)
         if cached:
