@@ -343,6 +343,12 @@ class StartButtonsTests(unittest.TestCase):
     def test_free_clone_cannot_hide_buttons(self):
         self.assertEqual(len(self.view(False, plan="free", branding=False)), 3)
 
+    def test_about_page_uses_template_and_botname(self):
+        txt = engine.render_about("My <Bot>")
+        self.assertIn("My &lt;Bot&gt;", txt)
+        self.assertNotIn("{botname}", txt)
+        self.assertEqual(txt.count("<b>"), txt.count("</b>"))              # well-formed HTML
+
     def test_owner_keeps_settings_button(self):
         rows = self.view(True, uid=500)
         self.assertEqual(len(rows), 2)
