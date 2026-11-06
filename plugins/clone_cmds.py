@@ -200,6 +200,13 @@ async def pre_details_cmd(client, message):
 
 
 # ============================================================== /clone
+@Bot.on_message(filters.command("start") & filters.private & filters.regex(r"^/start(@\w+)?\s+clone$"), group=-1)
+async def start_clone_payload(client, message):
+    """Opened from the 'Create my own clone' button inside a clone bot."""
+    await clone_cmd(client, message)
+    message.stop_propagation()
+
+
 @Bot.on_message(filters.command("clone") & filters.private)
 async def clone_cmd(client, message):
     mgr = ctx.manager
