@@ -13,11 +13,12 @@ from typing import List, Optional, Tuple
 
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus, ParseMode
-from pyrogram.errors import FloodWait, UserIsBlocked, UserNotParticipant
+from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, UserNotParticipant
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC
+from config import (ABOUT_OWNER_NAME, BOT_VERSION, CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC,
+                    SUPPORT_NAME, SUPPORT_URL, UPDATES_NAME, UPDATES_URL)
 from clone import ctx, genlink, logs, panels
 from clone.antispam import gate, is_exempt
 from clone.cmdlist import commands_text
@@ -344,22 +345,116 @@ async def on_start(client, message):
     if payload:
         return await handle_payload(client, message, clone, payload)
 
-    s, lim = clone["settings"], limits(plan)
-    template = s["start"]["text"] if lim["custom_start"] and s["start"]["text"] else DEFAULT_START
-    u = message.from_user
-    text = fill(template, first=esc(u.first_name or ""), mention=u.mention, id=u.id,
-                username=f"@{u.username}" if u.username else "")
-    text = branded(clone, plan, text)
-    kb = None
-    if uid == clone["owner_id"]:
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton(sc("⚙️ settings"), callback_data=f"cs|{cid}|s|home")]])
-    pic = s["start"]["pic"] if lim["custom_start"] and s["start"]["pic"] else START_PIC
-    if pic and len(text) <= 1024:
+    _, skip_ads = await staff_or_skip(clone, uid)
+    text, kb, pic = start_view(clone, plan, message.from_user, skip_ads)
+    if pic:
         try:
             return await message.reply_photo(pic, caption=text, reply_markup=kb, quote=True)
         except Exception:
             pass
     await message.reply_text(text, reply_markup=kb, quote=True, disable_web_page_preview=True)
+
+
+# ------------------------------------------------------------------ start page + help / about
+def start_view(clone: dict, plan: str, u, skip_ads: bool):
+    """(text, keyboard, pic) of the /start page. skip_ads = premium user / staff: they only get Help + About."""
+    s, lim, cid = clone["settings"], limits(plan), clone["_id"]
+    template = s["start"]["text"] if lim["custom_start"] and s["start"]["text"] else DEFAULT_START
+    text = fill(template, first=esc(u.first_name or ""), mention=u.mention, id=u.id,
+                username=f"@{u.username}" if u.username else "")
+    text = branded(clone, plan, text)
+
+    rows = []
+    if u.id == clone["owner_id"]:
+        rows.append([InlineKeyboardButton(sc("⚙️ settings"), callback_data=f"cs|{cid}|s|home")])
+    rows.append([InlineKeyboardButton(sc("❓ help"), callback_data="cl|help"),
+                 InlineKeyboardButton(sc("ℹ️ about"), callback_data="cl|about")])
+    # Promo buttons: every non-premium user sees all 4. They are hidden only for premium users / staff (skip_ads)
+    # or when the clone is premium AND its admin switched branding off (white-label) - same rule as the footer.
+    if not skip_ads and brand_text(clone, plan):
+        main_un = getattr(ctx.manager.main, "username", "") or ""
+        if main_un:
+            rows.append([InlineKeyboardButton(sc("🤖 create my own clone"), url=f"https://t.me/{main_un}?start=clone")])
+        if UPDATES_URL:
+            rows.append([InlineKeyboardButton(sc("📢 update channel"), url=UPDATES_URL)])
+
+    pic = s["start"]["pic"] if lim["custom_start"] and s["start"]["pic"] else START_PIC
+    return text, InlineKeyboardMarkup(rows), (pic if pic and len(text) <= 1024 else None)
+
+
+def help_text() -> str:
+    return sc(
+        "<b>❓ how to use this bot</b>\n"
+        "<blockquote>• open a shared link and the files arrive in this chat.\n"
+        "• if asked, join the required channels and tap try again.\n"
+        "• /getvideo sends a random video.\n"
+        "• /cmd shows every command.\n"
+        "• premium users skip ads and verification.</blockquote>\n"
+        "<i>files may be deleted automatically, forward them somewhere safe.</i>")
+
+
+def about_text(client, clone: dict) -> str:
+    me = getattr(client, "me", None)
+    name = esc((getattr(me, "first_name", "") or clone.get("username") or "").strip())
+    return (f"<b>{sc('🤖 about me')}</b>\n"
+            f"<blockquote>🏷 {sc('name')}  ›  <b>{name}</b>\n"
+            f"👑 {sc('owner')}  ›  <b>{esc(ABOUT_OWNER_NAME)}</b>\n"
+            f"📢 {sc('updates')}  ›  <b>{esc(UPDATES_NAME)}</b>\n"
+            f"💬 {sc('support')}  ›  <b>{esc(SUPPORT_NAME)}</b>\n"
+            f"🧩 {sc('version')}  ›  <code>v{esc(BOT_VERSION)}</code></blockquote>")
+
+
+def _about_markup() -> InlineKeyboardMarkup:
+    rows = []
+    links = [InlineKeyboardButton(sc(f"📢 {UPDATES_NAME}"), url=UPDATES_URL)] if UPDATES_URL else []
+    if SUPPORT_URL:
+        links.append(InlineKeyboardButton(sc(f"💬 {SUPPORT_NAME}"), url=SUPPORT_URL))
+    if links:
+        rows.append(links)
+    rows.append([InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _show(client, query, text: str, markup, pic=None):
+    """Edit the start message in place; swap the message only when text <-> photo has to change."""
+    msg = query.message
+    is_photo = bool(getattr(msg, "photo", None))
+    try:
+        if is_photo and pic:
+            await msg.edit_caption(text, reply_markup=markup)
+        elif not is_photo and not pic:
+            await msg.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            if pic:
+                await client.send_photo(msg.chat.id, pic, caption=text, reply_markup=markup)
+            else:
+                await client.send_message(msg.chat.id, text, reply_markup=markup, disable_web_page_preview=True)
+    except MessageNotModified:
+        pass
+
+
+async def on_info_cb(client, query):
+    clone = await current(client)
+    if not clone:
+        return await query.answer()
+    action = query.data.split("|")[1]
+    uid = query.from_user.id
+    plan, _ = await ctx.manager.plan_of(clone)
+    back = InlineKeyboardMarkup([[InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")]])
+    if action == "help":
+        await _show(client, query, help_text(), back)
+    elif action == "about":
+        await _show(client, query, about_text(client, clone), _about_markup())
+    else:
+        _, skip_ads = await staff_or_skip(clone, uid)
+        text, kb, pic = start_view(clone, plan, query.from_user, skip_ads)
+        await _show(client, query, text, kb, pic)
+    await query.answer()
+    query.stop_propagation()
 
 
 async def on_getvideo(client, message):
@@ -416,6 +511,7 @@ async def register(client):
     add(MessageHandler(on_settings, filters.command("settings") & priv))
     add(MessageHandler(on_cancel, filters.command("cancel") & priv))
     genlink.register(client)
+    add(CallbackQueryHandler(on_info_cb, filters.regex(r"^cl\|(help|about|back)$")), group=-1)
     add(CallbackQueryHandler(panels.on_callback, filters.regex(r"^cs\|")), group=-1)
     add(MessageHandler(panels.on_input, priv & ~filters.command(["start", "cancel"]) & panels.has_pending), group=1)
 
