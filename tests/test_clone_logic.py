@@ -308,6 +308,47 @@ def _aw(v):
     return f()
 
 
+class StartButtonsTests(unittest.TestCase):
+    def view(self, skip_ads, uid=900, plan="free", branding=True):
+        from unittest import mock
+        from clone import ctx
+        ctx.manager = SimpleNamespace(main=SimpleNamespace(username="MainBot"))
+        clone = {"_id": 7, "owner_id": 500, "username": "MyClone", "settings": store.default_settings()}
+        clone["settings"]["branding"] = branding
+        u = SimpleNamespace(id=uid, first_name="A", username=None, mention="A")
+        with mock.patch.object(engine, "InlineKeyboardButton", lambda t, **kw: (t, kw)), \
+             mock.patch.object(engine, "InlineKeyboardMarkup", lambda rows: rows), \
+             mock.patch.object(engine, "limits", lambda plan: {"custom_start": False}):
+            return engine.start_view(clone, plan, u, skip_ads)[1]
+
+    def test_non_premium_user_gets_all_four_buttons(self):
+        rows = self.view(False)
+        self.assertEqual(len(rows[0]), 2)                                  # help | about
+        urls = [b[1]["url"] for r in rows[1:] for b in r]
+        self.assertEqual(len(urls), 2)
+        self.assertIn("https://t.me/MainBot?start=clone", urls)
+
+    def test_premium_user_only_help_and_about(self):
+        rows = self.view(True)
+        self.assertEqual([b[1]["callback_data"] for b in rows[0]], ["cl|help", "cl|about"])
+        self.assertEqual(len(rows), 1)
+
+    def test_premium_clone_with_branding_off_hides_main_buttons(self):
+        rows = self.view(False, plan="premium", branding=False)
+        self.assertEqual(len(rows), 1)
+
+    def test_premium_clone_with_branding_on_still_shows_all(self):
+        self.assertEqual(len(self.view(False, plan="premium", branding=True)), 3)
+
+    def test_free_clone_cannot_hide_buttons(self):
+        self.assertEqual(len(self.view(False, plan="free", branding=False)), 3)
+
+    def test_owner_keeps_settings_button(self):
+        rows = self.view(True, uid=500)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows[0][0][1]["callback_data"].startswith("cs|7|s"))
+
+
 # ================================================================== settings merge
 class StoreTests(unittest.TestCase):
     def test_merge_adds_new_keys_and_keeps_saved(self):
