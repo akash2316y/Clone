@@ -17,8 +17,8 @@ from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, UserNo
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import (ABOUT_OWNER_NAME, BOT_VERSION, CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC,
-                    SUPPORT_NAME, SUPPORT_URL, UPDATES_NAME, UPDATES_URL)
+from config import (ABOUT_TEXT, CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC,
+                    UPDATES_URL)
 from clone import ctx, genlink, logs, panels
 from clone.antispam import gate, is_exempt
 from clone.cmdlist import commands_text
@@ -393,26 +393,18 @@ def help_text() -> str:
         "<i>files may be deleted automatically, forward them somewhere safe.</i>")
 
 
+def render_about(name: str) -> str:
+    """The About page - same text everywhere, only {botname} changes."""
+    return ABOUT_TEXT.replace("{botname}", esc((name or "").strip()))
+
+
 def about_text(client, clone: dict) -> str:
     me = getattr(client, "me", None)
-    name = esc((getattr(me, "first_name", "") or clone.get("username") or "").strip())
-    return (f"<b>{sc('🤖 about me')}</b>\n"
-            f"<blockquote>🏷 {sc('name')}  ›  <b>{name}</b>\n"
-            f"👑 {sc('owner')}  ›  <b>{esc(ABOUT_OWNER_NAME)}</b>\n"
-            f"📢 {sc('updates')}  ›  <b>{esc(UPDATES_NAME)}</b>\n"
-            f"💬 {sc('support')}  ›  <b>{esc(SUPPORT_NAME)}</b>\n"
-            f"🧩 {sc('version')}  ›  <code>v{esc(BOT_VERSION)}</code></blockquote>")
+    return render_about(getattr(me, "first_name", "") or clone.get("username") or "")
 
 
 def _about_markup() -> InlineKeyboardMarkup:
-    rows = []
-    links = [InlineKeyboardButton(sc(f"📢 {UPDATES_NAME}"), url=UPDATES_URL)] if UPDATES_URL else []
-    if SUPPORT_URL:
-        links.append(InlineKeyboardButton(sc(f"💬 {SUPPORT_NAME}"), url=SUPPORT_URL))
-    if links:
-        rows.append(links)
-    rows.append([InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")])
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup([[InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")]])
 
 
 async def _show(client, query, text: str, markup, pic=None):
