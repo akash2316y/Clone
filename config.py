@@ -4,9 +4,6 @@ from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Load .env file
-load_dotenv()
-
 #Bot token @Botfather
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 
@@ -120,6 +117,14 @@ PREMIUM_BUTTON2 = reply_markup=InlineKeyboardMarkup(
 
 
 OWNER_TAG = os.environ.get("OWNER_TAG", "@AlwaysToHelpBot")
+
+# ---- Clone /start buttons + "About me" page (same text for every user) ----
+ABOUT_OWNER_NAME = os.environ.get("ABOUT_OWNER_NAME", OWNER_TAG)           # shown as "Owner"
+UPDATES_NAME = os.environ.get("UPDATES_NAME", "Updates")
+UPDATES_URL = os.environ.get("UPDATES_URL", "https://t.me/AlwaysToHelpBot")  # also the "Update Channel" button
+SUPPORT_NAME = os.environ.get("SUPPORT_NAME", "Support")
+SUPPORT_URL = os.environ.get("SUPPORT_URL", "https://t.me/AlwaysToHelpBot")
+BOT_VERSION = os.environ.get("BOT_VERSION", "1.0")
 
 #UPI ID
 BUSINESS_UPI = os.environ.get("BUSINESS_UPI", "nothingcopyright@airtel")
