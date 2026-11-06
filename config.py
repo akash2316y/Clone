@@ -126,6 +126,21 @@ SUPPORT_NAME = os.environ.get("SUPPORT_NAME", "Support")
 SUPPORT_URL = os.environ.get("SUPPORT_URL", "https://t.me/AlwaysToHelpBot")
 BOT_VERSION = os.environ.get("BOT_VERSION", "1.0")
 
+# About page (clone bots AND main bot). {botname} is replaced with the bot's own name.
+ABOUT_TEXT = os.environ.get("ABOUT_TEXT", (
+    "<b>🤖 ᴍʏ ɴᴀᴍᴇ: {botname}\n"
+    "» ᴄʀᴇᴀᴛᴏʀ: <a href='https://t.me/Madhav_S9'>sᴏʟᴏ</a>\n"
+    "» ᴏᴜʀ ᴄᴏᴍᴍᴜɴɪᴛʏ : <a href='https://t.me/TEAM_HTX'>ᴛᴇᴀᴍ ʜᴛx</a>\n"
+    "» ᴀɴɪᴍᴇ ᴄʜᴀɴɴᴇʟ : <a href='https://t.me/anime_hindi_sub_industry'>ᴀɴɪᴍᴇ ɪɴᴅᴜsᴛʀʏ</a>\n"
+    "» ᴏɴɢᴏɪɴɢ ɪɴᴅᴜsᴛʀʏ : <a href='https://t.me/OngoingAnime_Industry'>ᴏɴɢᴏɪɴɢ ɪɴᴅᴜsᴛʀʏ</a>\n"
+    "» ɪɴᴅᴜsᴛʀʏ ɴᴇᴡs : <a href='https://t.me/Anime_News_Industry'>ɪɴᴅᴜsᴛʀʏ ɴᴇᴡs</a>\n"
+    "» ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href='https://t.me/i_killed_my_clan'>ᴏʙɪᴛᴏ</a></b>"))
+
+# Main bot plain /start text ({mention} = clickable user name)
+MAIN_START_TEXT = os.environ.get("MAIN_START_TEXT", (
+    "<b>ʜᴇʏ {mention} ✨\n\nɪ ᴀᴍ ᴀ ғɪʟᴇ sʜᴀʀɪɴɢ ʙᴏᴛ. ɪ ᴄᴀɴ sᴛᴏʀᴇ ᴘʀɪᴠᴀᴛᴇ ғɪʟᴇs ɪɴ ᴍʏ ᴅᴀᴛᴀʙᴀsᴇ "
+    "ᴀɴᴅ sʜᴀʀᴇ ᴛʜᴇᴍ ᴡɪᴛʜ ᴏᴛʜᴇʀ ᴜsᴇʀs ᴠɪᴀ ʟɪɴᴋs.</b>"))
+
 #UPI ID
 BUSINESS_UPI = os.environ.get("BUSINESS_UPI", "nothingcopyright@airtel")
 
