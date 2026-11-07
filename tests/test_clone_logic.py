@@ -343,16 +343,94 @@ class StartButtonsTests(unittest.TestCase):
     def test_free_clone_cannot_hide_buttons(self):
         self.assertEqual(len(self.view(False, plan="free", branding=False)), 3)
 
-    def test_about_page_uses_template_and_botname(self):
-        txt = engine.render_about("My <Bot>")
-        self.assertIn("My &lt;Bot&gt;", txt)
-        self.assertNotIn("{botname}", txt)
-        self.assertEqual(txt.count("<b>"), txt.count("</b>"))              # well-formed HTML
+    def test_clone_about_page_has_every_line(self):
+        txt = engine.render_about("My <Bot>", "Main Bot", "<a href='tg://user?id=5'>Admin</a>")
+        self.assertIn("My &lt;Bot&gt;", txt)                                # name is escaped
+        self.assertIn("ᴄʟᴏɴᴇ ᴏꜰ:</b> Main Bot", txt)
+        self.assertIn("ᴍʏ ᴏᴡɴᴇʀ:</b> <a href='tg://user?id=5'>Admin</a>", txt)
+        self.assertIn(">UnknownBotz</a>", txt)
+        self.assertIn(">UnknownBotzChat</a>", txt)
+        self.assertIn("ᴠᴇʀsɪᴏɴ:</b> 1.0", txt)
+        self.assertNotIn("{", txt)                                          # no placeholder left behind
+        self.assertEqual(txt.count("<b>"), txt.count("</b>"))               # well-formed HTML
+        self.assertLessEqual(len(txt), 1024)                                # fits a photo caption
+
+    def test_main_about_page_has_no_clone_of_line(self):
+        txt = engine.render_about_main("Owner Bot", "<a href='tg://user?id=1'>Boss</a>")
+        self.assertIn("ᴍʏ ɴᴀᴍᴇ:</b> Owner Bot", txt)
+        self.assertIn("ᴍʏ ᴏᴡɴᴇʀ:</b> <a href='tg://user?id=1'>Boss</a>", txt)
+        self.assertNotIn("ᴄʟᴏɴᴇ ᴏꜰ", txt)
+        self.assertNotIn("{", txt)
+
+    def test_bot_name_that_looks_like_a_placeholder_is_not_expanded(self):
+        txt = engine.render_about("{owner}", "{version}", "OWNER")
+        self.assertIn("ᴍʏ ɴᴀᴍᴇ:</b> {owner}", txt)
+        self.assertIn("ᴄʟᴏɴᴇ ᴏꜰ:</b> {version}", txt)
 
     def test_owner_keeps_settings_button(self):
         rows = self.view(True, uid=500)
         self.assertEqual(len(rows), 2)
         self.assertTrue(rows[0][0][1]["callback_data"].startswith("cs|7|s"))
+
+
+class InPlaceEditTests(unittest.TestCase):
+    """Help / About / Back must edit the message they sit on and never send a new one."""
+    class Msg:
+        def __init__(self, photo):
+            self.photo = photo
+            self.chat = SimpleNamespace(id=1)
+            self.calls = []
+        async def edit_caption(self, text, reply_markup=None):
+            self.calls.append("edit_caption")
+        async def edit_text(self, text, reply_markup=None, disable_web_page_preview=None):
+            self.calls.append("edit_text")
+        async def delete(self):
+            self.calls.append("delete")
+
+    class Cli:
+        def __init__(self):
+            self.sent = []
+        async def send_photo(self, *a, **k):
+            self.sent.append("photo")
+        async def send_message(self, *a, **k):
+            self.sent.append("text")
+
+    def setUp(self):
+        # pyrogram is a MagicMock in these offline tests - give `except MessageNotModified` a real class
+        from unittest import mock
+        p = mock.patch.object(engine, "MessageNotModified", type("MessageNotModified", (Exception,), {}))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def go(self, photo, text="hi", pic="http://pic"):
+        msg, cli = self.Msg(photo), self.Cli()
+        run(engine._show(cli, SimpleNamespace(message=msg), text, None, pic))
+        return msg.calls, cli.sent
+
+    def test_photo_start_page_is_edited_via_caption(self):
+        self.assertEqual(self.go(photo=object()), (["edit_caption"], []))
+
+    def test_photo_page_stays_a_photo_even_without_pic(self):
+        self.assertEqual(self.go(photo=object(), pic=None), (["edit_caption"], []))
+
+    def test_text_start_page_is_edited_as_text(self):
+        self.assertEqual(self.go(photo=None), (["edit_text"], []))
+
+    def test_edit_failure_falls_back_to_one_new_message(self):
+        class Bad(self.Msg):
+            async def edit_caption(self, *a, **k):
+                raise RuntimeError("MEDIA_CAPTION_TOO_LONG")
+        msg, cli = Bad(object()), self.Cli()
+        run(engine._show(cli, SimpleNamespace(message=msg), "x" * 2000, None, "http://pic"))
+        self.assertEqual((msg.calls, cli.sent), (["delete"], ["text"]))
+
+
+class CaptionFitTests(unittest.TestCase):
+    def test_help_and_commands_fit_a_photo_caption(self):
+        import re as _re
+        from clone.cmdlist import commands_text
+        for t in (engine.help_text(), commands_text("clone"), commands_text("main")):
+            self.assertLessEqual(len(_re.sub(r"<[^>]+>", "", t)), 1024)
 
 
 # ================================================================== settings merge
