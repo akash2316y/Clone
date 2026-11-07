@@ -1,7 +1,8 @@
 """
 Main bot /start page - same look as the clone bots:
     [help] [about]  +  [create my own clone] [update channel]
-Help / About / Back edit the SAME message instead of sending a new one.
+Help / Commands / About / Back edit the SAME message instead of sending a new one.
+/help and /cmd open that same panel (one message), so their buttons edit it in place too.
 
 Only a plain "/start" is handled here. "/start <payload>" (file links, "/start clone") still goes to the
 existing handlers, so link delivery keeps working.
@@ -15,7 +16,8 @@ from bot import Bot
 from config import MAIN_START_TEXT, OWNER_ID, START_PIC, UPDATES_URL
 from database.database import db
 from clone import antispam
-from clone.engine import _show, fill, help_text, render_about
+from clone.cmdlist import commands_text
+from clone.engine import _show, about_text_main, back_markup, fill, help_markup, help_text, send_panel
 from clone.ui import sc
 
 log = logging.getLogger(__name__)
@@ -66,15 +68,29 @@ async def main_start(client, message):
     message.stop_propagation()
 
 
-@Bot.on_callback_query(filters.regex(r"^ms\|(help|about|back)$"), group=-1)
+@Bot.on_message(filters.command("help") & filters.private, group=-1)
+async def main_help(client, message):
+    """/help -> help page as a panel; its Commands / Back buttons edit this same message."""
+    await send_panel(message, help_text(), help_markup("ms"), START_PIC)
+    message.stop_propagation()
+
+
+@Bot.on_message(filters.command(["cmd", "commands"]) & filters.private, group=-1)
+async def main_cmd(client, message):
+    """/cmd -> command list as a panel; Back edits this same message."""
+    await send_panel(message, commands_text("main"), back_markup("ms"), START_PIC)
+    message.stop_propagation()
+
+
+@Bot.on_callback_query(filters.regex(r"^ms\|(help|about|back|cmd)$"), group=-1)
 async def main_start_cb(client, query):
     action = query.data.split("|")[1]
-    back = Markup([[Btn(sc("‹ back"), callback_data="ms|back")]])
     if action == "help":
-        await _show(client, query, help_text(), back)
+        await _show(client, query, help_text(), help_markup("ms"), START_PIC)
+    elif action == "cmd":
+        await _show(client, query, commands_text("main"), back_markup("ms", "help"), START_PIC)
     elif action == "about":
-        me = getattr(client, "me", None)
-        await _show(client, query, render_about(getattr(me, "first_name", "") or client.username or ""), back)
+        await _show(client, query, await about_text_main(client), back_markup("ms"), START_PIC)
     else:
         text, kb, pic = await _start_view(client, query.from_user)
         await _show(client, query, text, kb, pic)
