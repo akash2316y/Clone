@@ -7,6 +7,7 @@ import base64
 import binascii
 import logging
 import random
+import re
 import string
 import time
 from typing import List, Optional, Tuple
@@ -17,7 +18,8 @@ from pyrogram.errors import FloodWait, MessageNotModified, UserIsBlocked, UserNo
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import (ABOUT_TEXT, CLONE_BRANDING, OWNER_DB_CHANNEL, OWNER_ID, START_PIC,
+from config import (ABOUT_CLONE_TEXT, ABOUT_MAIN_TEXT, ABOUT_OWNER_NAME, BOT_VERSION, CLONE_BRANDING,
+                    OWNER_DB_CHANNEL, OWNER_ID, START_PIC, SUPPORT_NAME, SUPPORT_URL, UPDATES_NAME,
                     UPDATES_URL)
 from clone import ctx, genlink, logs, panels
 from clone.antispam import gate, is_exempt
@@ -393,40 +395,119 @@ def help_text() -> str:
         "<i>files may be deleted automatically, forward them somewhere safe.</i>")
 
 
-def render_about(name: str) -> str:
-    """The About page - same text everywhere, only {botname} changes."""
-    return ABOUT_TEXT.replace("{botname}", esc((name or "").strip()))
+def _link(name: str, url: str) -> str:
+    name = esc(name)
+    return f"<a href='{url}'>{name}</a>" if url else name
 
 
-def about_text(client, clone: dict) -> str:
+def _user_link(uid: int, name: str, username: Optional[str] = None) -> str:
+    name = esc((name or "").strip()) or str(uid)
+    url = f"https://t.me/{username}" if username else f"tg://user?id={uid}"
+    return f"<a href='{url}'>{name}</a>"
+
+
+def _about_fill(template: str, **kw) -> str:
+    """Drop the real values into the template. {name} etc. are replaced in ONE pass, so a bot name that
+    itself contains '{owner}' can never be expanded again."""
+    kw.setdefault("updates", _link(UPDATES_NAME, UPDATES_URL))
+    kw.setdefault("support", _link(SUPPORT_NAME, SUPPORT_URL))
+    kw.setdefault("version", esc(BOT_VERSION))
+    return re.sub(r"\{(\w+)\}", lambda m: str(kw.get(m.group(1), m.group(0))), template)
+
+
+def render_about(name: str, main_name: str = "", owner: str = "") -> str:
+    """About page of a CLONE bot. `owner` is ready-made HTML (see _user_link)."""
+    return _about_fill(ABOUT_CLONE_TEXT, name=esc((name or "").strip()),
+                       mainname=esc((main_name or "").strip()), owner=owner or esc(ABOUT_OWNER_NAME))
+
+
+def render_about_main(name: str, owner: str = "") -> str:
+    """About page of the MAIN (owner) bot."""
+    return _about_fill(ABOUT_MAIN_TEXT, name=esc((name or "").strip()), owner=owner or esc(ABOUT_OWNER_NAME))
+
+
+async def _name_of(client, user_id: int):
+    """(first_name, username) of a user, or (None, None) when Telegram can't tell us."""
+    try:
+        u = await client.get_users(user_id)
+        return u.first_name, u.username
+    except Exception:
+        return None, None
+
+
+async def about_text(client, clone: dict) -> str:
     me = getattr(client, "me", None)
-    return render_about(getattr(me, "first_name", "") or clone.get("username") or "")
+    name = getattr(me, "first_name", "") or clone.get("name") or clone.get("username") or ""
+    main_me = getattr(ctx.manager.main, "me", None)
+    main_name = getattr(main_me, "first_name", "") or getattr(ctx.manager.main, "username", "") or ""
+    oid = clone["owner_id"]
+    # the clone's own client can only see users who started it - the admin always did, but fall back to the main bot
+    first, un = await _name_of(client, oid)
+    if not first:
+        first, un = await _name_of(ctx.manager.main, oid)
+    owner = _user_link(oid, first or clone.get("owner_name") or str(oid), un)
+    return render_about(name, main_name, owner)
+
+
+async def about_text_main(client) -> str:
+    me = getattr(client, "me", None)
+    name = getattr(me, "first_name", "") or getattr(client, "username", "") or ""
+    first, un = await _name_of(client, OWNER_ID)
+    owner = _user_link(OWNER_ID, first, un) if first else esc(ABOUT_OWNER_NAME)
+    return render_about_main(name, owner)
 
 
 def _about_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")]])
 
 
+def help_markup(prefix: str) -> InlineKeyboardMarkup:
+    """Help page buttons. prefix = 'cl' (clone bots) or 'ms' (main bot)."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(sc("📖 commands"), callback_data=f"{prefix}|cmd"),
+                                  InlineKeyboardButton(sc("‹ back"), callback_data=f"{prefix}|back")]])
+
+
+def back_markup(prefix: str, to: str = "back") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(sc("‹ back"), callback_data=f"{prefix}|{to}")]])
+
+
 async def _show(client, query, text: str, markup, pic=None):
-    """Edit the start message in place; swap the message only when text <-> photo has to change."""
+    """Turn the message the button sits on into `text` + `markup` - always IN PLACE.
+
+    A photo message keeps its photo and only the caption changes; a text message only has its text changed.
+    A brand-new message is sent (old one deleted) only if Telegram refuses the edit, e.g. the text no longer
+    fits into a 1024-character photo caption.
+    """
     msg = query.message
     is_photo = bool(getattr(msg, "photo", None))
     try:
-        if is_photo and pic:
+        if is_photo:
             await msg.edit_caption(text, reply_markup=markup)
-        elif not is_photo and not pic:
-            await msg.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         else:
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-            if pic:
-                await client.send_photo(msg.chat.id, pic, caption=text, reply_markup=markup)
-            else:
-                await client.send_message(msg.chat.id, text, reply_markup=markup, disable_web_page_preview=True)
+            await msg.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        return
     except MessageNotModified:
+        return
+    except Exception as e:
+        logging.warning("in-place edit failed (%s) - sending a fresh message", e)
+    try:
+        await msg.delete()
+    except Exception:
         pass
+    if pic and is_photo and len(re.sub(r"<[^>]+>", "", text)) <= 1024:
+        await client.send_photo(msg.chat.id, pic, caption=text, reply_markup=markup)
+    else:
+        await client.send_message(msg.chat.id, text, reply_markup=markup, disable_web_page_preview=True)
+
+
+async def send_panel(message, text: str, markup, pic=None):
+    """Reply with a start-style panel: photo + caption when it fits, plain text otherwise."""
+    if pic and len(re.sub(r"<[^>]+>", "", text)) <= 1024:
+        try:
+            return await message.reply_photo(pic, caption=text, reply_markup=markup, quote=True)
+        except Exception:
+            pass
+    return await message.reply_text(text, reply_markup=markup, quote=True, disable_web_page_preview=True)
 
 
 async def on_info_cb(client, query):
@@ -436,11 +517,12 @@ async def on_info_cb(client, query):
     action = query.data.split("|")[1]
     uid = query.from_user.id
     plan, _ = await ctx.manager.plan_of(clone)
-    back = InlineKeyboardMarkup([[InlineKeyboardButton(sc("‹ back"), callback_data="cl|back")]])
     if action == "help":
-        await _show(client, query, help_text(), back)
+        await _show(client, query, help_text(), help_markup("cl"))
+    elif action == "cmd":
+        await _show(client, query, commands_text("clone"), back_markup("cl", "help"))
     elif action == "about":
-        await _show(client, query, about_text(client, clone), _about_markup())
+        await _show(client, query, await about_text(client, clone), _about_markup())
     else:
         _, skip_ads = await staff_or_skip(clone, uid)
         text, kb, pic = start_view(clone, plan, query.from_user, skip_ads)
@@ -467,8 +549,27 @@ async def on_getvideo(client, message):
     await send_video(client, message, clone, plan)
 
 
+def _panel_pic(clone: dict, plan: str):
+    s, lim = clone["settings"], limits(plan)
+    return s["start"]["pic"] if lim["custom_start"] and s["start"]["pic"] else START_PIC
+
+
 async def on_cmd(client, message):
-    await message.reply_text(commands_text("clone"), quote=True)
+    """/cmd and /commands -> command list as a panel (its buttons edit this same message)."""
+    clone = await current(client)
+    if not clone:
+        return await message.reply_text(commands_text("clone"), quote=True)
+    plan, _ = await ctx.manager.plan_of(clone)
+    await send_panel(message, commands_text("clone"), back_markup("cl"), _panel_pic(clone, plan))
+
+
+async def on_help(client, message):
+    """/help -> help page as a panel (Commands / Back buttons edit this same message)."""
+    clone = await current(client)
+    if not clone:
+        return await message.reply_text(help_text(), quote=True)
+    plan, _ = await ctx.manager.plan_of(clone)
+    await send_panel(message, help_text(), help_markup("cl"), _panel_pic(clone, plan))
 
 
 async def on_myclone(client, message):
@@ -498,12 +599,13 @@ async def register(client):
     add(CallbackQueryHandler(gate), group=-2)
     add(MessageHandler(on_start, filters.command("start") & priv))
     add(MessageHandler(on_getvideo, filters.command("getvideo") & priv))
-    add(MessageHandler(on_cmd, filters.command(["cmd", "commands", "help"]) & priv))
+    add(MessageHandler(on_cmd, filters.command(["cmd", "commands"]) & priv))
+    add(MessageHandler(on_help, filters.command("help") & priv))
     add(MessageHandler(on_myclone, filters.command("myclone") & priv))
     add(MessageHandler(on_settings, filters.command("settings") & priv))
     add(MessageHandler(on_cancel, filters.command("cancel") & priv))
     genlink.register(client)
-    add(CallbackQueryHandler(on_info_cb, filters.regex(r"^cl\|(help|about|back)$")), group=-1)
+    add(CallbackQueryHandler(on_info_cb, filters.regex(r"^cl\|(help|about|back|cmd)$")), group=-1)
     add(CallbackQueryHandler(panels.on_callback, filters.regex(r"^cs\|")), group=-1)
     add(MessageHandler(panels.on_input, priv & ~filters.command(["start", "cancel"]) & panels.has_pending), group=1)
 
