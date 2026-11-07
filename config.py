@@ -118,23 +118,34 @@ PREMIUM_BUTTON2 = reply_markup=InlineKeyboardMarkup(
 
 OWNER_TAG = os.environ.get("OWNER_TAG", "@AlwaysToHelpBot")
 
-# ---- Clone /start buttons + "About me" page (same text for every user) ----
-ABOUT_OWNER_NAME = os.environ.get("ABOUT_OWNER_NAME", OWNER_TAG)           # shown as "Owner"
-UPDATES_NAME = os.environ.get("UPDATES_NAME", "Updates")
-UPDATES_URL = os.environ.get("UPDATES_URL", "https://t.me/AlwaysToHelpBot")  # also the "Update Channel" button
-SUPPORT_NAME = os.environ.get("SUPPORT_NAME", "Support")
-SUPPORT_URL = os.environ.get("SUPPORT_URL", "https://t.me/AlwaysToHelpBot")
+# ---- /start buttons + "About me" page ----
+ABOUT_OWNER_NAME = os.environ.get("ABOUT_OWNER_NAME", OWNER_TAG)            # owner shown on the MAIN bot's About page
+UPDATES_NAME = os.environ.get("UPDATES_NAME", "UnknownBotz")
+UPDATES_URL = os.environ.get("UPDATES_URL", "https://t.me/UnknownBotz")      # also the "Update Channel" button
+SUPPORT_NAME = os.environ.get("SUPPORT_NAME", "UnknownBotzChat")
+SUPPORT_URL = os.environ.get("SUPPORT_URL", "https://t.me/UnknownBotzChat")
 BOT_VERSION = os.environ.get("BOT_VERSION", "1.0")
 
-# About page (clone bots AND main bot). {botname} is replaced with the bot's own name.
-ABOUT_TEXT = os.environ.get("ABOUT_TEXT", (
-    "<b>🤖 ᴍʏ ɴᴀᴍᴇ: {botname}\n"
-    "» ᴄʀᴇᴀᴛᴏʀ: <a href='https://t.me/Madhav_S9'>sᴏʟᴏ</a>\n"
-    "» ᴏᴜʀ ᴄᴏᴍᴍᴜɴɪᴛʏ : <a href='https://t.me/TEAM_HTX'>ᴛᴇᴀᴍ ʜᴛx</a>\n"
-    "» ᴀɴɪᴍᴇ ᴄʜᴀɴɴᴇʟ : <a href='https://t.me/anime_hindi_sub_industry'>ᴀɴɪᴍᴇ ɪɴᴅᴜsᴛʀʏ</a>\n"
-    "» ᴏɴɢᴏɪɴɢ ɪɴᴅᴜsᴛʀʏ : <a href='https://t.me/OngoingAnime_Industry'>ᴏɴɢᴏɪɴɢ ɪɴᴅᴜsᴛʀʏ</a>\n"
-    "» ɪɴᴅᴜsᴛʀʏ ɴᴇᴡs : <a href='https://t.me/Anime_News_Industry'>ɪɴᴅᴜsᴛʀʏ ɴᴇᴡs</a>\n"
-    "» ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href='https://t.me/i_killed_my_clan'>ᴏʙɪᴛᴏ</a></b>"))
+# About page of every CLONE bot.
+#   {name} = clone bot name, {mainname} = main bot name, {owner} = clone admin (clickable),
+#   {updates} / {support} = linked channel / group, {version} = BOT_VERSION
+ABOUT_CLONE_TEXT = os.environ.get("ABOUT_CLONE_TEXT", (
+    "<b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n"
+    "<b>ᴍʏ ɴᴀᴍᴇ:</b> {name}\n"
+    "<b>ᴄʟᴏɴᴇ ᴏꜰ:</b> {mainname}\n"
+    "<b>ᴍʏ ᴏᴡɴᴇʀ:</b> {owner}\n"
+    "<b>ᴜᴘᴅᴀᴛᴇs:</b> {updates}\n"
+    "<b>sᴜᴘᴘᴏʀᴛ:</b> {support}\n"
+    "<b>ᴠᴇʀsɪᴏɴ:</b> {version}"))
+
+# About page of the MAIN (owner) bot. Same placeholders, without {mainname}.
+ABOUT_MAIN_TEXT = os.environ.get("ABOUT_MAIN_TEXT", (
+    "<b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n"
+    "<b>ᴍʏ ɴᴀᴍᴇ:</b> {name}\n"
+    "<b>ᴍʏ ᴏᴡɴᴇʀ:</b> {owner}\n"
+    "<b>ᴜᴘᴅᴀᴛᴇs:</b> {updates}\n"
+    "<b>sᴜᴘᴘᴏʀᴛ:</b> {support}\n"
+    "<b>ᴠᴇʀsɪᴏɴ:</b> {version}"))
 
 # Main bot plain /start text ({mention} = clickable user name)
 MAIN_START_TEXT = os.environ.get("MAIN_START_TEXT", (
